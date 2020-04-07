@@ -1,8 +1,44 @@
 
+class OverreadException(Exception):
+	pass
+
+def overreadAssert(value, msg="Overread"):
+	if not value:
+		raise OverreadException(msg)
+
+def makeSafeRead(read):
+	def r2(n, read=read):
+		data = read(n)
+		if len(data) != n:
+			raise OverreadException("Overread")
+		return data
+	return r2
+
 def toSigned_(bits, n):
 	sign = n >> (bits-1)
 	mask = (1 << bits) - 1
 	return (((-1)^mask) * sign) | (n & mask)
+
+class ConstBytes(object):
+	def __init__(self, data, output=None):
+		self.data = data
+		self.output = output
+	def read(self, read):
+		assert(read(len(self.data)) == self.data)
+		return self.output
+	def write(self, write, data):
+		write(self.data)
+
+class Bytes(object):
+	def __init__(self, length):
+		self.length = length
+	def read(self, read):
+		data = read(self.length)
+		assert(len(data) == self.length)
+		return data
+	def write(self, write, data):
+		assert(len(data) == self.length)
+		write(data)		
 
 class Array(object):
 	def __init__(self, tp, n):
@@ -167,8 +203,8 @@ class Empty(object):
 class NamedFields(object):
 	def __init__(self, fields):
 		self.fields = fields
-	def write(self, write, data):
-		assert(len(data) == len(self.fields))
+	def write(self, write, data, ignoreUnused=False):
+		assert(len(data) == len(self.fields) or ignoreUnused)
 		for name, tp in self.fields:
 			tp.write(write, data[name])
 	def read(self, read):
@@ -181,14 +217,24 @@ class Branch(object):
 	def __init__(self, branches):
 		self.branches = branches
 		self.by_name = dict()
-		for i, (name, _) in enumerate(self.branches):
-			self.by_name[name] = i
+		self.by_id = dict()
+		i = 0
+		for branch in self.branches:
+			if len(branch) == 2:
+				branch = branch + (i,)
+			elif len(branch) == 3:
+				pass
+			else:
+				assert(False)
+			self.by_name[branch[0]] = branch
+			self.by_id[branch[2]] = branch
+			i = branch[2]+1
 	def write(self, write, data):
-		iD = self.by_name[data[0]]
-		Int.write(write, iD)
-		self.branches[iD][1].write(write, data[1])
+		branch = self.by_name[data[0]]
+		Int.write(write, branch[2])
+		branch[1].write(write, data[1])
 	def read(self, read):
-		branch = self.branches[Int.read(read)]
+		branch = self.by_id[Int.read(read)]
 		return (
 			branch[0],
 			branch[1].read(read)

@@ -1,48 +1,35 @@
 import socket
 import protocol
 import pack
+import sys
+import time
 
-SimpleInfoHead = pack.NamedFields((
-	("version", pack.Int),
-	("numClients", pack.Int),
-	("maxClients", pack.Int),
-	("paused", pack.Int),
-	("mode", pack.Int),
-	("timelimit", pack.Int),
-	("masterMode", pack.Int),
-))
-
-SimpleInfoOpt = pack.NamedFields((
-	("paused", pack.Int),
-	("speed", pack.Int),
-))
-
-SimpleInfoFoot = pack.NamedFields((
-	("map", pack.ByteString),
-	("description", pack.ByteString),
-))
-
-class SimpleInfo:
-	@staticmethod
-	def read(read):
-		head = SimpleInfoHead.read(read)
-		if head["paused"] == 5:
-			tmp = SimpleInfoOpt.read(read)
-			head["paused"] = tmp["paused"]
-			head["speed"] = tmp["speed"]
-		else:
-			head["paused"] = 0
-			head["speed"] = 100
-		foot = SimpleInfoFoot.read(read)
-		for k, v in foot.items():
-			head[k] = v
-		return head
-
-target = ("127.0.0.1", 42000)
+target = (sys.argv[1], int(sys.argv[2]))
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-pl = b"\x01Hallo"
-sock.sendto(b"\xff\xff"+pl, target)
-sock.settimeout(10)
-res = sock.recvfrom(1024*8)[0][len(pl):]
-print(repr(res))
-print(pack.fromBytes(SimpleInfo.read, res))
+
+pl = b"" #b"\x01Hallo"
+# ~ sock.sendto(b"\xff\xff"+pl, target)
+# ~ sock.sendto(b"\x00\x01"+pack.toBytes(pack.Int.write, -1)+b"HelloThisIsNotGoodHelloThisIsNotGoodHelloThisIsNotGoodHelloThisIsNotGood"[:29], target)
+
+# ~ data = b"\x00\x01"+pack.toBytes(pack.Int.write, -1)
+data = b"\x01"
+
+print("request", data)
+
+sock.sendto(data, target)
+
+sock.settimeout(.3)
+try:
+	while True:
+		res = sock.recvfrom(1024*8)[0][len(pl):]
+		print(repr(res))
+		
+		for i in range(100000):
+			unpacked = pack.fromBytes(protocol.SauerPong(pack.Empty).read, res)
+			# ~ print(unpacked)
+			packed = pack.toBytes(protocol.SauerPong(pack.Empty).write, unpacked)
+			# ~ print(packed)
+		t = time.time() - t
+except socket.timeout:
+	pass
+# ~ print(pack.fromBytes(protocol.SauerPongTail.read, res))
