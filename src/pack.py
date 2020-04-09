@@ -169,6 +169,32 @@ class ByteString(object):
 			buf.append(c)
 		return bytes(buf)
 
+_encodeBytes2Points = []
+_encodePoints2Bytes = {}
+for i in range(256):
+	try:
+		c = bytes((i,)).decode("cp1252")
+		
+	except UnicodeDecodeError:
+		# Map invalid bytes to unicode private use area
+		# https://en.wikipedia.org/wiki/Private_Use_Areas
+		c = chr(0xF700 | i)
+	_encodeBytes2Points.append(c)
+	_encodePoints2Bytes[c] = i
+
+def encodeString(s):
+	return bytes(_encodePoints2Bytes[i] for i in s)
+def decodeString(b):
+	return "".join(_encodeBytes2Points[i] for i in b)
+
+class EncodedString(object):
+	@staticmethod
+	def write(write, s):
+		ByteString.write(write, encodeString(s))
+	@staticmethod
+	def read(read):
+		return decodeString(ByteString.read(read))
+
 # This is a more reasonable way to encode a string
 class SubBuffer(object):
 	@staticmethod

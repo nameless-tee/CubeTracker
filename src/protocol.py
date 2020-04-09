@@ -28,8 +28,8 @@ CubePongOpt = pack.NamedFields((
 ))
 
 CubePongFoot = pack.NamedFields((
-	("map", pack.ByteString),
-	("description", pack.ByteString),
+	("map", pack.EncodedString),
+	("description", pack.EncodedString),
 ))
 
 class TesserPongTail:
@@ -47,31 +47,33 @@ class TesserPongTail:
 		head.update(foot)
 		return head
 
-class SauerPongTail:
-	@staticmethod
-	def read(read):
-		head = SauerPongHead.read(read)
-		if head["paused"] == 7:
+class GenericPongTail:
+	def __init__(self, headType, pauseIndicators):
+		self.headType = headType
+		self.pauseIndicators = pauseIndicators
+	def read(self, read):
+		head = self.headType.read(read)
+		if head["paused"] == self.pauseIndicators[0]:
 			opt = CubePongOpt.read(read)
 			head["paused"] = bool(opt["paused"])
 			head["speed"] = opt["speed"]
 		else:
+			assert(head["paused"] == self.pauseIndicators[1])
 			head["paused"] = False
 			head["speed"] = 100
 		foot = CubePongFoot.read(read)
 		head.update(foot)
 		return head
-	@staticmethod
-	def write(write, data):
+	def write(self, write, data):
 		copy = dict(data.items())
 		tmp = data["paused"]
 		try:
 			if data["speed"] == 100 and not data["paused"]:
-				data["paused"] = 5
-				SauerPongHead.write(write, copy, ignoreUnused = True)
+				data["paused"] = self.pauseIndicators[1]
+				self.headType.write(write, copy, ignoreUnused = True)
 			else:
-				copy["paused"] = 7
-				SauerPongHead.write(write, copy, ignoreUnused = True)
+				copy["paused"] = self.pauseIndicators[0]
+				self.headType.write(write, copy, ignoreUnused = True)
 				CubePongOpt.write(write, {
 					"paused" : 1 if tmp else 0,
 					"speed" : data["speed"]
@@ -79,13 +81,29 @@ class SauerPongTail:
 		finally:
 			data["paused"] = tmp
 		CubePongFoot.write(write, data, ignoreUnused = True)
-		
 
-SauerExtPlayer = pack.NamedFields((
+SauerPongTail = GenericPongTail(SauerPongHead, (7, 5))
+TesserPongTail = GenericPongTail(TesserPongHead, (5, 3))
+
+class IP(object):
+	@staticmethod
+	def read(read):
+		ip = read(3)
+		assert(len(ip) == 3)
+		return (ip[0] << 16) | (ip[1] << 8) | ip[2]
+	def write(write, ip):
+		assert(ip >> 24 == 0)
+		write(
+			(ip >> 16),
+			(ip >> 8) & 0xFF,
+			(ip >> 0) & 0xFF,
+		)
+
+CubeExtPlayer = pack.NamedFields((
 	("num", pack.Int),
 	("ping", pack.Int),
-	("name", pack.ByteString),
-	("team", pack.ByteString),
+	("name", pack.EncodedString),
+	("team", pack.EncodedString),
 	("frags", pack.Int),
 	("flags", pack.Int),
 	("deaths", pack.Int),
@@ -96,19 +114,17 @@ SauerExtPlayer = pack.NamedFields((
 	("weapon", pack.Int),
 	("priviledge", pack.Int),
 	("state", pack.Int),
-	("ip", pack.Bytes(3)),
+	("ip", IP),
 ))
 
-# ~ class S
-
-SauerExtHead = pack.NamedFields((
+CubeExtHead = pack.NamedFields((
 	("ack", pack.ConstBytes(pack.toBytes(pack.Int.write, -1))),
 	("version", pack.Int),
 ))
 
-class SauerExtPlayerIDs(object):
-	@classmethod
-	def read(self, read):
+class CubeExtPlayerIDs(object):
+	@staticmethod
+	def read(read):
 		safe = pack.makeSafeRead(read)
 		ids = []
 		while True:
@@ -117,29 +133,39 @@ class SauerExtPlayerIDs(object):
 			except pack.OverreadException:
 				break
 		return ids
+	@staticmethod
+	def write(write, data):
+		for i in data:
+			pack.Int.write(write, data[i])
+		
 
-SauerExtStats = pack.NamedFields((
-	("head", SauerExtHead),
+CubeExtStats = pack.NamedFields((
+	("head", CubeExtHead),
 	("noerror", pack.ConstBytes(pack.toBytes(pack.Int.write, 0))), # EXT_NO_ERROR
 	("data",  pack.Branch((
-		("ids", SauerExtPlayerIDs, -10), # EXT_PLAYERSTATS_RESP_IDS
-		("player", SauerExtPlayer, -11), # EXT_PLAYERSTATS_RESP_STATS
+		("ids", CubeExtPlayerIDs, -10), # EXT_PLAYERSTATS_RESP_IDS
+		("player", CubeExtPlayer, -11), # EXT_PLAYERSTATS_RESP_STATS
 	)))
 ))
 
-SauerExtTeamsHead = pack.NamedFields((
-	("head", SauerExtHead),
+CubeExtUptime = pack.NamedFields((
+	("head", CubeExtHead),
+	("uptime", pack.Int),
+))
+
+CubeExtTeamsHead = pack.NamedFields((
+	("head", CubeExtHead),
 	("teammode", pack.Int),
 	("mode", pack.Int),
 	("remaining", pack.Int),
 ))
 
-class SauerExtTeamsTeam(object):
+class CubeExtTeamsTeam(object):
 	@staticmethod
 	def read(read):
 		safe = pack.makeSafeRead(read)
 		try:
-			name = pack.ByteString.read(safe)
+			name = pack.EncodedString.read(safe)
 		except pack.OverreadException:
 			return None
 		score = pack.Int.read(read)
@@ -157,7 +183,7 @@ class SauerExtTeamsTeam(object):
 		}
 	@staticmethod
 	def write(write, data):
-		pack.ByteString.write(write, data["name"])
+		pack.EncodedString.write(write, data["name"])
 		pack.Int.write(write, data["score"])
 		if data["bases"] == None:
 			pack.Int.write(write, -1)
@@ -166,32 +192,32 @@ class SauerExtTeamsTeam(object):
 			for base in data["bases"]:
 				pack.Int.write(write, base)
 
-class SauerExtTeams(object):
+class CubeExtTeams(object):
 	@staticmethod
 	def read(read):
-		head = SauerExtTeamsHead.read(read)
+		head = CubeExtTeamsHead.read(read)
 		head["teammode"] = not head["teammode"]
 		teams = []
 		if head["teammode"]:
 			teams = []
-			while (team := SauerExtTeamsTeam.read(read)) != None:
+			while (team := CubeExtTeamsTeam.read(read)) != None:
 				teams.append(team)
 				
 		head["teams"] = teams
 		return head
 	@staticmethod
 	def write(write, data):
-		SauerExtTeamsHead.write(write, {
+		CubeExtTeamsHead.write(write, {
 			"head" : data["head"],
 			"teammode" : 0 if data["teammode"] else 1,
 			"mode" : data["mode"],
 			"remaining" : data["remaining"],
 		})
 		for team in data["teams"]:
-			SauerExtTeamsTeam.write(write, team)
+			CubeExtTeamsTeam.write(write, team)
 
 
-class SauerPingHead(object):
+class CubePingHead(object):
 	extTypes = ["uptime", "stats", "teams"]
 	extIDs = dict((tp, i) for i, tp in enumerate(extTypes))
 	# ~ def __init__(self, payloadType):
@@ -231,53 +257,61 @@ class SauerPingHead(object):
 				# ~ "payload" : self.pt.read(read),
 			}
 
-
-
-class SauerPong(object):
-	extMap = {
-		"stats" : SauerExtStats,
-		"uptime" : pack.Int,
-		"teams" : SauerExtTeams,		
-	}
+class SauerPing(pack.NamedFields):
 	def __init__(self, payloadType):
-		self.pt = payloadType
-	def read(self, read):
-		head = SauerPingHead.read(read)
-		pl = self.pt.read(read)
-		if head["type"] == "ping":
-			return {
-				"head" : head,
-				"data" : SauerPongTail.read(read),
-				"payload" : pl,
-			}
-		elif head["type"] == "ext":
-			return {
-				"head" : head,
-				"data" : self.extMap[head["ext"]].read(read),
-				"payload" : pl,
-			}
-		else:
-			raise ArgumentError("Invalid ping type")
+		super().__init__((
+			("head", CubePingHead),
+			("payload", payloadType),
+		))
+
+class TesserPing(SauerPing):
+	def __init__(self, payloadType):
+		super().__init__(payloadType)
 	def write(self, write, data):
-		SauerPingHead.write(write, data["head"])
-		self.pt.write(write, data["payload"])
-		if data["head"]["type"] == "ping":
-			SauerPongTail.write(write, data["data"])
-		elif data["head"]["type"] == "ext":
-			self.extMap[data["head"]["ext"]].write(write, data["data"])
+		write(b"\xff\xff")
+		super().write(write, data)
+	def read(self, read):
+		assert(read(2) == b"\xff\xff")
+		return super().read(read)
 
+class GenericPong(object):
+		extMap = {
+			"stats" : CubeExtStats,
+			"uptime" : CubeExtUptime,
+			"teams" : CubeExtTeams,		
+		}
+		def __init__(self, payloadType):
+			self.pt = payloadType
+		def read(self, read):
+			head = CubePingHead.read(read)
+			# ~ print("head", head)
+			pl = self.pt.read(read)
+			if head["type"] == "ping":
+				return {
+					"head" : head,
+					"payload" : pl,
+					"data" : self.tailType.read(read),
+				}
+			elif head["type"] == "ext":
+				return {
+					"head" : head,
+					"payload" : pl,
+					"data" : self.extMap[head["ext"]].read(read),
+				}
+			else:
+				raise ArgumentError("Invalid ping type")
+		def write(self, write, data):
+			CubePingHead.write(write, data["head"])
+			self.pt.write(write, data["payload"])
+			if data["head"]["type"] == "ping":
+				self.tailType.write(write, data["data"])
+			elif data["head"]["type"] == "ext":
+				self.extMap[data["head"]["ext"]].write(write, data["data"])
 
-# ~ class SauerExtStats(object):
-	# ~ @staticmethod
-	# ~ def read(read):
-		
+class SauerPong(GenericPong):
+	tailType = SauerPongTail
 
-# ~ class SauerExtHead(object):
-	# ~ ACK = pack.ConstBytes(pack.toBytes(pack.Int.write, -1))
-	# ~ VER = pack.ConstBytes(pack.toBytes(pack.Int.write, 105))
-	# ~ @staticmethod
-	# ~ def read(read):
-		# ~ self.ACK.read(read)
-		# ~ self.VER.read(read)
+class TesserPong(GenericPong):
+	tailType = TesserPongTail
 
 

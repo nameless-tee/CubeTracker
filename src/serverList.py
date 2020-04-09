@@ -29,7 +29,8 @@ def isIP(buf):
 
 def isPort(buf):
 	try:
-		if not (1 <= int(buf) <= 65535):
+		# Must be smaller than 65535 because ping uses n+1
+		if not (1 <= int(buf) < 65535):
 			return False
 	except ValueError:
 		return False
@@ -77,15 +78,20 @@ def makePing(i = 1):
 		"ext" : None,
 	})
 
+emptyPing = protocol.SauerPing(pack.Empty)
+
 def showPingAll():
 	lst = getServerList()
 	sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 	for i, addr in enumerate(lst):
 		# ~ ping = makePing(i+1)
-		ping = pack.toBytes(protocol.SauerPingHead.write, {
-			"type" : "ext",
-			"arg" : -1,
-			"ext" : "stats",
+		ping = pack.toBytes(emptyPing.write, {
+			"head" : {
+				"type" : "ext",
+				"arg" : -1,
+				"ext" : "stats",
+			},
+			"payload" : None,
 		})
 		sock.sendto(ping, (addr[0], addr[1]+1))
 		showPings(sock, 0.01)
