@@ -95,6 +95,16 @@ def showPingAll():
 		})
 		sock.sendto(ping, (addr[0], addr[1]+1))
 		showPings(sock, 0.01)
+		ping = pack.toBytes(emptyPing.write, {
+			"head" : {
+				"type" : "ping",
+				"arg" : -1,
+				"ext" : None,
+			},
+			"payload" : None,
+		})
+		sock.sendto(ping, (addr[0], addr[1]+1))
+		showPings(sock, 0.01)
 	showPings(sock, 5)
 
 if __name__ == "__main__":
